@@ -47,18 +47,14 @@ make game ADDR=your-public-host:your-public-port
 
 Use Railway for this project's current raw TCP server shape.
 
+This repo includes a checked-in [railway.json](/home/ryth/projects/ascii-game/railway.json) so Railway builds the dedicated server binary and starts the correct entrypoint automatically.
+
 1. Push this repo to GitHub.
 2. In Railway, create a new project from the GitHub repo.
-3. In the service settings, set the start command to:
-
-```bash
-go run ./cmd/server
-```
-
-4. Deploy the service.
-5. In Railway service settings, create a TCP proxy for the service.
-6. Railway will give you a public TCP endpoint like `something.proxy.rlwy.net:15140`.
-7. Every player runs the client locally and points it at that public endpoint:
+3. Deploy the service.
+4. In the Railway service settings, open `Networking` and create a `TCP Proxy` that targets the internal port exposed by the app.
+5. Railway will give you a public TCP endpoint like `something.proxy.rlwy.net:15140`.
+6. Every player runs the client locally and points it at that public endpoint:
 
 ```bash
 make game ADDR=something.proxy.rlwy.net:15140
@@ -66,6 +62,7 @@ make game ADDR=something.proxy.rlwy.net:15140
 
 Notes:
 
-- The server now automatically listens on `0.0.0.0:$PORT` when Railway provides `PORT`.
+- Railway config builds `./cmd/server` into `./bin/server` and starts that binary.
+- The server listens on `0.0.0.0:$PORT` when Railway provides `PORT`.
 - Local development still uses `127.0.0.1:7777` by default.
 - Only the server is deployed to Railway. The `tcell` client still runs in each player's terminal.
