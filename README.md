@@ -33,15 +33,19 @@ make game ADDR=your-public-host
 ## Controls
 
 - Move: arrow keys or `hjkl`
+- Use medkit: `1`
+- Use shield battery: `2`
 - Quit: `Esc` or `Ctrl+C`
 
 ## Current slice
 
 - Authoritative TCP server at 30 TPS
 - Terminal client that renders server snapshots
-- Async keyboard input forwarded as move commands
+- Async keyboard input forwarded as move and item-use commands
 - Large tile map with visible collidable terrain
 - Camera follows the local player from replicated state
+- Server-authoritative health, shield, inventory, and trap interactions
+- Multi-line HUD with replicated HP/SP bars and inventory counts
 
 ## Railway deploy
 

@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"ascii-game/internal/sim"
+	"ascii-game/internal/world"
 )
 
 const (
@@ -15,6 +16,13 @@ const (
 	MsgJoinAck  byte = 0x02
 	MsgMove     byte = 0x03
 	MsgSnapshot byte = 0x04
+	MsgUseItem  byte = 0x05
+)
+
+const (
+	snapshotHeaderSize = 12
+	playerStateSize    = 32
+	trapStateSize      = 9
 )
 
 type Message struct {
@@ -97,13 +105,31 @@ func UnmarshalMove(payload []byte) (int, int, error) {
 	return int(int8(payload[0])), int(int8(payload[1])), nil
 }
 
+func MarshalUseItem(slot int) ([]byte, error) {
+	if slot < 0 || slot > 255 {
+		return nil, fmt.Errorf("slot out of range: %d", slot)
+	}
+
+	return []byte{byte(slot)}, nil
+}
+
+func UnmarshalUseItem(payload []byte) (int, error) {
+	if len(payload) != 1 {
+		return 0, fmt.Errorf("use item payload must be 1 byte, got %d", len(payload))
+	}
+
+	return int(payload[0]), nil
+}
+
 func MarshalSnapshot(snapshot sim.Snapshot) []byte {
 	playerCount := len(snapshot.Players)
-	buf := make([]byte, 8+2+(playerCount*20))
+	trapCount := len(snapshot.Traps)
+	buf := make([]byte, snapshotHeaderSize+(playerCount*playerStateSize)+(trapCount*trapStateSize))
 	binary.BigEndian.PutUint64(buf[0:8], uint64(snapshot.Tick))
 	binary.BigEndian.PutUint16(buf[8:10], uint16(playerCount))
+	binary.BigEndian.PutUint16(buf[10:12], uint16(trapCount))
 
-	offset := 10
+	offset := snapshotHeaderSize
 	for _, player := range snapshot.Players {
 		binary.BigEndian.PutUint64(buf[offset:offset+8], uint64(player.ID))
 		offset += 8
@@ -113,25 +139,47 @@ func MarshalSnapshot(snapshot sim.Snapshot) []byte {
 		offset += 4
 		binary.BigEndian.PutUint32(buf[offset:offset+4], uint32(player.Sprite))
 		offset += 4
+		binary.BigEndian.PutUint16(buf[offset:offset+2], uint16(player.Health))
+		offset += 2
+		binary.BigEndian.PutUint16(buf[offset:offset+2], uint16(player.Shield))
+		offset += 2
+		binary.BigEndian.PutUint16(buf[offset:offset+2], uint16(player.MaxHP))
+		offset += 2
+		binary.BigEndian.PutUint16(buf[offset:offset+2], uint16(player.MaxSP))
+		offset += 2
+		binary.BigEndian.PutUint16(buf[offset:offset+2], uint16(player.HealthItemCount))
+		offset += 2
+		binary.BigEndian.PutUint16(buf[offset:offset+2], uint16(player.ShieldItemCount))
+		offset += 2
+	}
+
+	for _, trap := range snapshot.Traps {
+		binary.BigEndian.PutUint32(buf[offset:offset+4], uint32(int32(trap.Pos.X)))
+		offset += 4
+		binary.BigEndian.PutUint32(buf[offset:offset+4], uint32(int32(trap.Pos.Y)))
+		offset += 4
+		buf[offset] = byte(trap.Type)
+		offset++
 	}
 
 	return buf
 }
 
 func UnmarshalSnapshot(payload []byte) (sim.Snapshot, error) {
-	if len(payload) < 10 {
+	if len(payload) < snapshotHeaderSize {
 		return sim.Snapshot{}, fmt.Errorf("snapshot payload too short: %d", len(payload))
 	}
 
 	tick := int64(binary.BigEndian.Uint64(payload[0:8]))
 	playerCount := int(binary.BigEndian.Uint16(payload[8:10]))
-	expected := 10 + (playerCount * 20)
+	trapCount := int(binary.BigEndian.Uint16(payload[10:12]))
+	expected := snapshotHeaderSize + (playerCount * playerStateSize) + (trapCount * trapStateSize)
 	if len(payload) != expected {
 		return sim.Snapshot{}, fmt.Errorf("snapshot payload size mismatch: got %d want %d", len(payload), expected)
 	}
 
 	players := make([]sim.PlayerState, 0, playerCount)
-	offset := 10
+	offset := snapshotHeaderSize
 	for i := 0; i < playerCount; i++ {
 		player := sim.PlayerState{
 			ID: sim.PlayerID(binary.BigEndian.Uint64(payload[offset : offset+8])),
@@ -143,11 +191,36 @@ func UnmarshalSnapshot(payload []byte) (sim.Snapshot, error) {
 		offset += 4
 		player.Sprite = rune(binary.BigEndian.Uint32(payload[offset : offset+4]))
 		offset += 4
+		player.Health = int(binary.BigEndian.Uint16(payload[offset : offset+2]))
+		offset += 2
+		player.Shield = int(binary.BigEndian.Uint16(payload[offset : offset+2]))
+		offset += 2
+		player.MaxHP = int(binary.BigEndian.Uint16(payload[offset : offset+2]))
+		offset += 2
+		player.MaxSP = int(binary.BigEndian.Uint16(payload[offset : offset+2]))
+		offset += 2
+		player.HealthItemCount = int(binary.BigEndian.Uint16(payload[offset : offset+2]))
+		offset += 2
+		player.ShieldItemCount = int(binary.BigEndian.Uint16(payload[offset : offset+2]))
+		offset += 2
 		players = append(players, player)
+	}
+
+	traps := make([]sim.TrapState, 0, trapCount)
+	for i := 0; i < trapCount; i++ {
+		trap := sim.TrapState{}
+		trap.Pos.X = int(int32(binary.BigEndian.Uint32(payload[offset : offset+4])))
+		offset += 4
+		trap.Pos.Y = int(int32(binary.BigEndian.Uint32(payload[offset : offset+4])))
+		offset += 4
+		trap.Type = world.TrapType(payload[offset])
+		offset++
+		traps = append(traps, trap)
 	}
 
 	return sim.Snapshot{
 		Tick:    tick,
 		Players: players,
+		Traps:   traps,
 	}, nil
 }

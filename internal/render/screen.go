@@ -1,12 +1,22 @@
 package render
 
-import "github.com/gdamore/tcell/v2"
+import (
+	"errors"
+	"os"
+
+	"github.com/gdamore/tcell/v2"
+	"golang.org/x/term"
+)
 
 type Screen struct {
 	screen tcell.Screen
 }
 
 func New() (*Screen, error) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+		return nil, errors.New("game requires an interactive terminal (TTY) on stdin/stdout")
+	}
+
 	s, err := tcell.NewScreen()
 	if err != nil {
 		return nil, err

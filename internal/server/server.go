@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -38,6 +39,8 @@ type clientSession struct {
 type playerInput struct {
 	playerID sim.PlayerID
 	delta    gamemath.Vec2
+	slot     int
+	useItem  bool
 }
 
 func New(addr string) *Server {
@@ -65,8 +68,14 @@ func (s *Server) Run() error {
 		Addr:    s.addr,
 		Handler: mux,
 	}
+
+	listener, err := net.Listen("tcp", s.addr)
+	if err != nil {
+		return err
+	}
+
 	go func() {
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := s.httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 			log.Printf("http server stopped: %v", err)
 		}
 	}()
@@ -85,6 +94,10 @@ func (s *Server) Run() error {
 		case client := <-s.unregister:
 			s.removeClient(client)
 		case input := <-s.inputs:
+			if input.useItem {
+				s.sim.QueueUseItem(input.playerID, input.slot)
+				continue
+			}
 			s.sim.QueueMove(input.playerID, input.delta)
 		case <-ticker.C:
 			s.sim.Tick()
@@ -205,6 +218,18 @@ func (s *Server) readLoop(client *clientSession) {
 			s.inputs <- playerInput{
 				playerID: client.playerID,
 				delta:    gamemath.Vec2{X: dx, Y: dy},
+			}
+		case proto.MsgUseItem:
+			slot, err := proto.UnmarshalUseItem(msg.Payload)
+			if err != nil {
+				s.unregister <- client
+				return
+			}
+
+			s.inputs <- playerInput{
+				playerID: client.playerID,
+				slot:     slot,
+				useItem:  true,
 			}
 		default:
 			s.unregister <- client

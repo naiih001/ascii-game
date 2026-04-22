@@ -10,6 +10,8 @@ const (
 	ActionMoveDown
 	ActionMoveLeft
 	ActionMoveRight
+	ActionUseHealth
+	ActionUseShield
 	ActionQuit
 	ActionResize
 )
@@ -26,6 +28,10 @@ func Poll(screen tcell.Screen, out chan<- Action) {
 			switch {
 			case ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC:
 				out <- ActionQuit
+			case ev.Rune() == '1':
+				out <- ActionUseHealth
+			case ev.Rune() == '2':
+				out <- ActionUseShield
 			case ev.Key() == tcell.KeyUp || ev.Rune() == 'k':
 				out <- ActionMoveUp
 			case ev.Key() == tcell.KeyDown || ev.Rune() == 'j':

@@ -1,6 +1,10 @@
 package world
 
-import gamemath "ascii-game/internal/math"
+import (
+	"sort"
+
+	gamemath "ascii-game/internal/math"
+)
 
 const (
 	defaultMapWidth  = 240
@@ -11,6 +15,24 @@ type Map struct {
 	Tiles  [][]rune
 	Width  int
 	Height int
+	Traps  map[gamemath.Vec2]Trap
+}
+
+type TrapType byte
+
+const (
+	TrapSpike TrapType = iota + 1
+	TrapEMP
+	TrapAcid
+)
+
+type Trap struct {
+	Pos         gamemath.Vec2
+	Type        TrapType
+	Damage      int
+	ShieldDrain int
+	Triggered   bool
+	OneShot     bool
 }
 
 func NewDefaultMap() *Map {
@@ -50,11 +72,16 @@ func NewDefaultMap() *Map {
 	carveRoad(tiles, 138, 4, 138, 110)
 	carveRoad(tiles, 206, 10, 206, 116)
 
-	return &Map{
+	m := &Map{
 		Tiles:  tiles,
 		Width:  defaultMapWidth,
 		Height: defaultMapHeight,
+		Traps:  make(map[gamemath.Vec2]Trap),
 	}
+
+	populateDefaultTraps(m)
+
+	return m
 }
 
 func (m *Map) InBounds(pos gamemath.Vec2) bool {
@@ -75,6 +102,64 @@ func (m *Map) TileAt(pos gamemath.Vec2) rune {
 	}
 
 	return m.Tiles[pos.Y][pos.X]
+}
+
+func (m *Map) AddTrap(pos gamemath.Vec2, trap Trap) {
+	trap.Pos = pos
+	m.Traps[pos] = trap
+}
+
+func (m *Map) TrapAt(pos gamemath.Vec2) (Trap, bool) {
+	trap, ok := m.Traps[pos]
+	return trap, ok
+}
+
+func (m *Map) SetTrap(trap Trap) {
+	m.Traps[trap.Pos] = trap
+}
+
+func (m *Map) RemoveTrap(pos gamemath.Vec2) {
+	delete(m.Traps, pos)
+}
+
+func (m *Map) ActiveTraps() []Trap {
+	traps := make([]Trap, 0, len(m.Traps))
+	for _, trap := range m.Traps {
+		traps = append(traps, trap)
+	}
+
+	sort.Slice(traps, func(i, j int) bool {
+		if traps[i].Pos.Y == traps[j].Pos.Y {
+			return traps[i].Pos.X < traps[j].Pos.X
+		}
+		return traps[i].Pos.Y < traps[j].Pos.Y
+	})
+
+	return traps
+}
+
+func NewSpikeTrap() Trap {
+	return Trap{
+		Type:    TrapSpike,
+		Damage:  20,
+		OneShot: true,
+	}
+}
+
+func NewEMPTrap() Trap {
+	return Trap{
+		Type:        TrapEMP,
+		ShieldDrain: 30,
+	}
+}
+
+func NewAcidTrap() Trap {
+	return Trap{
+		Type:        TrapAcid,
+		Damage:      15,
+		ShieldDrain: 15,
+		OneShot:     true,
+	}
 }
 
 func carveSpawnPlaza(tiles [][]rune, startX, startY, width, height int) {
@@ -142,4 +227,18 @@ func setWall(tiles [][]rune, x, y int) {
 	}
 
 	tiles[y][x] = '#'
+}
+
+func populateDefaultTraps(m *Map) {
+	for pos, trap := range map[gamemath.Vec2]Trap{
+		{X: 18, Y: 12}:  NewSpikeTrap(),
+		{X: 42, Y: 40}:  NewEMPTrap(),
+		{X: 76, Y: 76}:  NewAcidTrap(),
+		{X: 138, Y: 28}: NewSpikeTrap(),
+		{X: 206, Y: 96}: NewEMPTrap(),
+	} {
+		if m.IsWalkable(pos) {
+			m.AddTrap(pos, trap)
+		}
+	}
 }

@@ -97,16 +97,23 @@ func websocketURL(addr string) (url.URL, error) {
 		return *parsed, nil
 	}
 
+	// Handle case where addr might contain a path but no scheme (e.g. host.com/ws)
 	scheme := "wss"
 	if isLocalAddress(addr) {
 		scheme = "ws"
 	}
 
-	return url.URL{
-		Scheme: scheme,
-		Host:   addr,
-		Path:   "/ws",
-	}, nil
+	// If it doesn't have a scheme, prepend one to help url.Parse distinguish host and path
+	parsed, err := url.Parse(scheme + "://" + addr)
+	if err != nil {
+		return url.URL{}, err
+	}
+
+	if parsed.Path == "" {
+		parsed.Path = "/ws"
+	}
+
+	return *parsed, nil
 }
 
 func isLocalAddress(addr string) bool {
@@ -137,6 +144,24 @@ func (c *Client) SendMove(delta gamemath.Vec2) error {
 	c.writeMu.Lock()
 	err = c.conn.WriteMessage(websocket.BinaryMessage, proto.EncodeMessage(proto.Message{
 		Type:    proto.MsgMove,
+		Payload: payload,
+	}))
+	c.writeMu.Unlock()
+	if err != nil {
+		c.setError(err)
+	}
+	return err
+}
+
+func (c *Client) SendUseItem(slot int) error {
+	payload, err := proto.MarshalUseItem(slot)
+	if err != nil {
+		return err
+	}
+
+	c.writeMu.Lock()
+	err = c.conn.WriteMessage(websocket.BinaryMessage, proto.EncodeMessage(proto.Message{
+		Type:    proto.MsgUseItem,
 		Payload: payload,
 	}))
 	c.writeMu.Unlock()
