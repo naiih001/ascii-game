@@ -19,7 +19,7 @@ make game
 For clients connecting to a deployed server:
 
 ```bash
-make game ADDR=your-public-host:your-public-port
+make game ADDR=your-public-host
 ```
 
 ## Make targets
@@ -45,24 +45,24 @@ make game ADDR=your-public-host:your-public-port
 
 ## Railway deploy
 
-Use Railway for this project's current raw TCP server shape.
+Use Railway's normal HTTP service shape for this project. The game server now upgrades `GET /ws` to a WebSocket connection and keeps the existing binary protocol inside those frames.
 
-This repo includes a checked-in [railway.json](/home/ryth/projects/ascii-game/railway.json) so Railway builds the dedicated server binary and starts the correct entrypoint automatically.
+This repo includes a checked-in [railway.json](/home/ryth/projects/ascii-game/railway.json) so Railway builds the dedicated server binary, starts the correct entrypoint, and exposes a simple `/healthz` endpoint for health checks.
 
 1. Push this repo to GitHub.
 2. In Railway, create a new project from the GitHub repo.
 3. Deploy the service.
-4. In the Railway service settings, open `Networking` and create a `TCP Proxy` that targets the internal port exposed by the app.
-5. Railway will give you a public TCP endpoint like `something.proxy.rlwy.net:15140`.
-6. Every player runs the client locally and points it at that public endpoint:
+4. Deploy the service and use the generated Railway public domain such as `your-game.up.railway.app`.
+5. Every player runs the client locally and points it at that public host:
 
 ```bash
-make game ADDR=something.proxy.rlwy.net:15140
+make game ADDR=your-game.up.railway.app
 ```
 
 Notes:
 
 - Railway config builds `./cmd/server` into `./bin/server` and starts that binary.
-- The server listens on `0.0.0.0:$PORT` when Railway provides `PORT`.
+- The server listens on `0.0.0.0:$PORT` when Railway provides `PORT` and serves WebSockets on `/ws`.
 - Local development still uses `127.0.0.1:7777` by default.
+- The local client automatically uses `ws://` for localhost addresses and `wss://` for non-local hosts.
 - Only the server is deployed to Railway. The `tcell` client still runs in each player's terminal.

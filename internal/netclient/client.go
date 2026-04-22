@@ -2,17 +2,21 @@ package netclient
 
 import (
 	"fmt"
-	"net"
+	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
 	gamemath "ascii-game/internal/math"
 	"ascii-game/internal/proto"
 	"ascii-game/internal/sim"
+	"github.com/gorilla/websocket"
 )
 
 type Client struct {
-	conn          net.Conn
+	conn          *websocket.Conn
+	writeMu       sync.Mutex
 	localPlayerID sim.PlayerID
 
 	mu       sync.RWMutex
@@ -24,33 +28,50 @@ type Client struct {
 }
 
 func Connect(addr string) (*Client, error) {
-	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	endpoint, err := websocketURL(addr)
 	if err != nil {
 		return nil, err
 	}
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 5 * time.Second,
+	}
 
-	if _, err := conn.Write(proto.EncodeMessage(proto.Message{
+	conn, resp, err := dialer.Dial(endpoint.String(), http.Header{})
+	if err != nil {
+		if resp != nil {
+			return nil, fmt.Errorf("websocket dial failed with status %s: %w", resp.Status, err)
+		}
+		return nil, err
+	}
+
+	if err := conn.WriteMessage(websocket.BinaryMessage, proto.EncodeMessage(proto.Message{
 		Type:    proto.MsgJoin,
 		Payload: proto.MarshalJoin(),
 	})); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, err
 	}
 
-	msg, err := proto.DecodeMessage(conn)
+	_, payload, err := conn.ReadMessage()
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
+		return nil, err
+	}
+
+	msg, err := proto.DecodeMessageBytes(payload)
+	if err != nil {
+		_ = conn.Close()
 		return nil, err
 	}
 
 	if msg.Type != proto.MsgJoinAck {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("expected join ack, got message type 0x%02x", msg.Type)
 	}
 
 	playerID, err := proto.UnmarshalJoinAck(msg.Payload)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, err
 	}
 
@@ -62,6 +83,39 @@ func Connect(addr string) (*Client, error) {
 	go client.readLoop()
 
 	return client, nil
+}
+
+func websocketURL(addr string) (url.URL, error) {
+	if strings.HasPrefix(addr, "ws://") || strings.HasPrefix(addr, "wss://") {
+		parsed, err := url.Parse(addr)
+		if err != nil {
+			return url.URL{}, err
+		}
+		if parsed.Path == "" {
+			parsed.Path = "/ws"
+		}
+		return *parsed, nil
+	}
+
+	scheme := "wss"
+	if isLocalAddress(addr) {
+		scheme = "ws"
+	}
+
+	return url.URL{
+		Scheme: scheme,
+		Host:   addr,
+		Path:   "/ws",
+	}, nil
+}
+
+func isLocalAddress(addr string) bool {
+	host := addr
+	if idx := strings.LastIndex(addr, ":"); idx != -1 {
+		host = addr[:idx]
+	}
+
+	return host == "127.0.0.1" || host == "localhost" || strings.HasPrefix(host, "0.0.0.0")
 }
 
 func (c *Client) LocalPlayerID() sim.PlayerID {
@@ -80,10 +134,12 @@ func (c *Client) SendMove(delta gamemath.Vec2) error {
 		return err
 	}
 
-	_, err = c.conn.Write(proto.EncodeMessage(proto.Message{
+	c.writeMu.Lock()
+	err = c.conn.WriteMessage(websocket.BinaryMessage, proto.EncodeMessage(proto.Message{
 		Type:    proto.MsgMove,
 		Payload: payload,
 	}))
+	c.writeMu.Unlock()
 	if err != nil {
 		c.setError(err)
 	}
@@ -106,7 +162,13 @@ func (c *Client) Close() error {
 
 func (c *Client) readLoop() {
 	for {
-		msg, err := proto.DecodeMessage(c.conn)
+		_, payload, err := c.conn.ReadMessage()
+		if err != nil {
+			c.setError(err)
+			return
+		}
+
+		msg, err := proto.DecodeMessageBytes(payload)
 		if err != nil {
 			c.setError(err)
 			return

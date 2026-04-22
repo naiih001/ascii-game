@@ -3,7 +3,7 @@ package server
 import (
 	"errors"
 	"log"
-	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -11,25 +11,28 @@ import (
 	"ascii-game/internal/proto"
 	"ascii-game/internal/sim"
 	"ascii-game/internal/world"
+	"github.com/gorilla/websocket"
 )
 
 const ticksPerSecond = 30
 
 type Server struct {
 	addr       string
-	listener   net.Listener
+	httpServer *http.Server
 	sim        *sim.Simulation
-	register   chan net.Conn
+	register   chan *websocket.Conn
 	unregister chan *clientSession
 	inputs     chan playerInput
 	clients    map[sim.PlayerID]*clientSession
+	upgrader   websocket.Upgrader
 }
 
 type clientSession struct {
-	conn     net.Conn
+	conn     *websocket.Conn
 	playerID sim.PlayerID
 	send     chan []byte
 	once     sync.Once
+	writeMu  sync.Mutex
 }
 
 type playerInput struct {
@@ -41,24 +44,33 @@ func New(addr string) *Server {
 	return &Server{
 		addr:       addr,
 		sim:        sim.New(world.NewDefaultMap()),
-		register:   make(chan net.Conn),
+		register:   make(chan *websocket.Conn),
 		unregister: make(chan *clientSession, 32),
 		inputs:     make(chan playerInput, 128),
 		clients:    make(map[sim.PlayerID]*clientSession),
+		upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool {
+				return true
+			},
+		},
 	}
 }
 
 func (s *Server) Run() error {
-	listener, err := net.Listen("tcp", s.addr)
-	if err != nil {
-		return err
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", s.handleWebSocket)
+	mux.HandleFunc("/healthz", s.handleHealth)
+
+	s.httpServer = &http.Server{
+		Addr:    s.addr,
+		Handler: mux,
 	}
-	defer listener.Close()
-
-	s.listener = listener
-	log.Printf("server listening on %s", listener.Addr())
-
-	go s.acceptLoop()
+	go func() {
+		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("http server stopped: %v", err)
+		}
+	}()
+	log.Printf("server listening on %s", s.addr)
 
 	ticker := time.NewTicker(time.Second / ticksPerSecond)
 	defer ticker.Stop()
@@ -81,23 +93,28 @@ func (s *Server) Run() error {
 	}
 }
 
-func (s *Server) acceptLoop() {
-	for {
-		conn, err := s.listener.Accept()
-		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				return
-			}
-			log.Printf("accept client: %v", err)
-			continue
-		}
-
-		s.register <- conn
-	}
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
 }
 
-func (s *Server) addClient(conn net.Conn) error {
-	msg, err := proto.DecodeMessage(conn)
+func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("upgrade websocket: %v", err)
+		return
+	}
+
+	s.register <- conn
+}
+
+func (s *Server) addClient(conn *websocket.Conn) error {
+	_, payload, err := conn.ReadMessage()
+	if err != nil {
+		return err
+	}
+
+	msg, err := proto.DecodeMessageBytes(payload)
 	if err != nil {
 		return err
 	}
@@ -165,7 +182,13 @@ func (s *Server) broadcastSnapshot() {
 
 func (s *Server) readLoop(client *clientSession) {
 	for {
-		msg, err := proto.DecodeMessage(client.conn)
+		_, payload, err := client.conn.ReadMessage()
+		if err != nil {
+			s.unregister <- client
+			return
+		}
+
+		msg, err := proto.DecodeMessageBytes(payload)
 		if err != nil {
 			s.unregister <- client
 			return
@@ -192,7 +215,10 @@ func (s *Server) readLoop(client *clientSession) {
 
 func (s *Server) writeLoop(client *clientSession) {
 	for msg := range client.send {
-		if _, err := client.conn.Write(msg); err != nil {
+		client.writeMu.Lock()
+		err := client.conn.WriteMessage(websocket.BinaryMessage, msg)
+		client.writeMu.Unlock()
+		if err != nil {
 			s.unregister <- client
 			return
 		}

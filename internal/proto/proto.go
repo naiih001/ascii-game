@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -48,6 +49,10 @@ func DecodeMessage(r io.Reader) (Message, error) {
 		Type:    buf[0],
 		Payload: buf[1:],
 	}, nil
+}
+
+func DecodeMessageBytes(buf []byte) (Message, error) {
+	return DecodeMessage(bytes.NewReader(buf))
 }
 
 func MarshalJoin() []byte {
