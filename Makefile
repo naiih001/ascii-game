@@ -1,7 +1,7 @@
 .PHONY: game server fmt test tidy help
 
 GO ?= go
-ADDR ?= 127.0.0.1:7777
+ADDR ?=
 GAME_CMD := ./cmd/game
 SERVER_CMD := ./cmd/server
 
@@ -14,10 +14,10 @@ help:
 	@printf "  make tidy    Sync Go module dependencies\n"
 
 game:
-	$(GO) run $(GAME_CMD) -addr $(ADDR)
+	$(GO) run $(GAME_CMD) $(if $(ADDR),-addr $(ADDR),)
 
 server:
-	$(GO) run $(SERVER_CMD) -addr $(ADDR)
+	$(GO) run $(SERVER_CMD) $(if $(ADDR),-addr $(ADDR),)
 
 fmt:
 	$(GO) fmt ./...

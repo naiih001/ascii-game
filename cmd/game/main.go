@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", "127.0.0.1:7777", "server address")
+	addr := flag.String("addr", "ascii-game-production.up.railway.app", "server address")
 	flag.Parse()
 
 	g, err := game.New(*addr)

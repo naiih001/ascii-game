@@ -57,16 +57,22 @@ This repo includes a checked-in [railway.json](/home/ryth/projects/ascii-game/ra
 2. In Railway, create a new project from the GitHub repo.
 3. Deploy the service.
 4. Deploy the service and use the generated Railway public domain such as `your-game.up.railway.app`.
-5. Every player runs the client locally and points it at that public host:
+5. Every player runs the client locally and it connects to the production server by default:
 
 ```bash
-make game ADDR=your-game.up.railway.app
+make game
+```
+
+To connect to a different server (e.g. for local development), use:
+
+```bash
+make game ADDR=127.0.0.1:7777
 ```
 
 Notes:
 
 - Railway config builds `./cmd/server` into `./bin/server` and starts that binary.
 - The server listens on `0.0.0.0:$PORT` when Railway provides `PORT` and serves WebSockets on `/ws`.
-- Local development still uses `127.0.0.1:7777` by default.
+- Local server development still uses `127.0.0.1:7777` by default.
 - The local client automatically uses `ws://` for localhost addresses and `wss://` for non-local hosts.
 - Only the server is deployed to Railway. The `tcell` client still runs in each player's terminal.
